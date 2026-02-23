@@ -334,7 +334,7 @@ export const MIGRATION_V5 = `
     version INTEGER NOT NULL UNIQUE,
     content TEXT NOT NULL,
     content_hash TEXT NOT NULL,
-    change_source TEXT NOT NULL,
+    change_source TEXT NOT NULL CHECK(change_source IN ('agent', 'human', 'system', 'genesis', 'reflection')),
     change_reason TEXT,
     previous_version_id TEXT,
     approved_by TEXT,
@@ -478,7 +478,7 @@ export const MIGRATION_V7 = `
     id TEXT PRIMARY KEY,
     child_id TEXT NOT NULL,
     from_state TEXT NOT NULL,
-    to_state TEXT NOT NULL,
+    to_state TEXT NOT NULL CHECK(to_state IN ('requested', 'sandbox_created', 'runtime_ready', 'wallet_verified', 'funded', 'starting', 'healthy', 'unhealthy', 'stopped', 'failed', 'cleaned_up')),
     reason TEXT,
     metadata TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -500,7 +500,7 @@ export const MIGRATION_V7 = `
     tx_hash TEXT NOT NULL,
     chain TEXT NOT NULL DEFAULT 'eip155:8453',
     operation TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'pending',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'submitted', 'confirmed', 'failed', 'reverted')),
     gas_used INTEGER,
     metadata TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -508,6 +508,7 @@ export const MIGRATION_V7 = `
 
   CREATE INDEX IF NOT EXISTS idx_lifecycle_child ON child_lifecycle_events(child_id);
   CREATE INDEX IF NOT EXISTS idx_lifecycle_created ON child_lifecycle_events(created_at);
+  CREATE INDEX IF NOT EXISTS idx_child_events ON child_lifecycle_events(child_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_onchain_hash ON onchain_transactions(tx_hash);
   CREATE INDEX IF NOT EXISTS idx_onchain_status ON onchain_transactions(status);
 `;

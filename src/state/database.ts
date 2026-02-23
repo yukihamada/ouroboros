@@ -1844,7 +1844,7 @@ export function lifecycleGetEvents(db: DatabaseType, childId: string): ChildLife
 
 export function lifecycleGetLatestState(db: DatabaseType, childId: string): ChildLifecycleState | null {
   const row = db
-    .prepare("SELECT to_state FROM child_lifecycle_events WHERE child_id = ? ORDER BY created_at DESC LIMIT 1")
+    .prepare("SELECT to_state FROM child_lifecycle_events WHERE child_id = ? ORDER BY rowid DESC LIMIT 1")
     .get(childId) as { to_state: string } | undefined;
   return (row?.to_state as ChildLifecycleState) ?? null;
 }
