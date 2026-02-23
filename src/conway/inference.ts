@@ -14,9 +14,6 @@ import type {
   TokenUsage,
   InferenceToolDefinition,
 } from "../types.js";
-import { ResilientHttpClient } from "./http-client.js";
-
-const INFERENCE_TIMEOUT_MS = 60_000;
 
 interface InferenceClientOptions {
   apiUrl: string;
@@ -26,6 +23,8 @@ interface InferenceClientOptions {
   lowComputeModel?: string;
   openaiApiKey?: string;
   anthropicApiKey?: string;
+  /** Ordered fallback models to try when primary fails */
+  fallbackModels?: string[];
 }
 
 type InferenceBackend = "conway" | "openai" | "anthropic";
@@ -34,18 +33,17 @@ export function createInferenceClient(
   options: InferenceClientOptions,
 ): InferenceClient {
   const { apiUrl, apiKey, openaiApiKey, anthropicApiKey } = options;
-  const httpClient = new ResilientHttpClient({
-    baseTimeout: INFERENCE_TIMEOUT_MS,
-    retryableStatuses: [429, 500, 502, 503, 504],
-  });
   let currentModel = options.defaultModel;
   let maxTokens = options.maxTokens;
 
-  const chat = async (
+  // Failover chain: primary + fallbacks
+  const fallbackModels = options.fallbackModels || [];
+
+  const chatSingle = async (
+    model: string,
     messages: ChatMessage[],
     opts?: InferenceOptions,
   ): Promise<InferenceResponse> => {
-    const model = opts?.model || currentModel;
     const tools = opts?.tools;
 
     // Newer models (o-series, gpt-5.x, gpt-4.1) require max_completion_tokens
@@ -86,7 +84,6 @@ export function createInferenceClient(
         tools,
         temperature: opts?.temperature,
         anthropicApiKey: anthropicApiKey as string,
-        httpClient,
       });
     }
 
@@ -101,17 +98,35 @@ export function createInferenceClient(
       apiUrl: openAiLikeApiUrl,
       apiKey: openAiLikeApiKey,
       backend,
-      httpClient,
     });
   };
 
-  /**
-   * @deprecated Use InferenceRouter for tier-based model selection.
-   * Still functional as a fallback; router takes priority when available.
-   */
+  const chat = async (
+    messages: ChatMessage[],
+    opts?: InferenceOptions,
+  ): Promise<InferenceResponse> => {
+    const primaryModel = opts?.model || currentModel;
+    const chain = [primaryModel, ...fallbackModels.filter((m) => m !== primaryModel)];
+    const errors: string[] = [];
+
+    for (const model of chain) {
+      try {
+        return await chatSingle(model, messages, { ...opts, model });
+      } catch (err: any) {
+        errors.push(`${model}: ${err.message}`);
+        // Continue to next fallback
+      }
+    }
+
+    // All providers failed
+    throw new Error(
+      `All inference providers failed:\n${errors.join("\n")}`,
+    );
+  };
+
   const setLowComputeMode = (enabled: boolean): void => {
     if (enabled) {
-      currentModel = options.lowComputeModel || "gpt-5-mini";
+      currentModel = options.lowComputeModel || "gpt-4.1";
       maxTokens = 4096;
     } else {
       currentModel = options.defaultModel;
@@ -145,11 +160,6 @@ function formatMessage(
   return formatted;
 }
 
-/**
- * Resolve which backend to use for a model.
- * When InferenceRouter is available, it uses the model registry's provider field.
- * This function is kept for backward compatibility with direct inference calls.
- */
 function resolveInferenceBackend(
   model: string,
   keys: {
@@ -157,15 +167,12 @@ function resolveInferenceBackend(
     anthropicApiKey?: string;
   },
 ): InferenceBackend {
-  // Anthropic models: claude-*
   if (keys.anthropicApiKey && /^claude/i.test(model)) {
     return "anthropic";
   }
-  // OpenAI models: gpt-*, o[1-9]*, chatgpt-*
   if (keys.openaiApiKey && /^(gpt|o[1-9]|chatgpt)/i.test(model)) {
     return "openai";
   }
-  // Default: Conway proxy (handles all models including unknown ones)
   return "conway";
 }
 
@@ -175,9 +182,8 @@ async function chatViaOpenAiCompatible(params: {
   apiUrl: string;
   apiKey: string;
   backend: "conway" | "openai";
-  httpClient: ResilientHttpClient;
 }): Promise<InferenceResponse> {
-  const resp = await params.httpClient.request(`${params.apiUrl}/v1/chat/completions`, {
+  const resp = await fetch(`${params.apiUrl}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -187,7 +193,6 @@ async function chatViaOpenAiCompatible(params: {
           : params.apiKey,
     },
     body: JSON.stringify(params.body),
-    timeout: INFERENCE_TIMEOUT_MS,
   });
 
   if (!resp.ok) {
@@ -242,7 +247,6 @@ async function chatViaAnthropic(params: {
   tools?: InferenceToolDefinition[];
   temperature?: number;
   anthropicApiKey: string;
-  httpClient: ResilientHttpClient;
 }): Promise<InferenceResponse> {
   const transformed = transformMessagesForAnthropic(params.messages);
   const body: Record<string, unknown> = {
@@ -251,7 +255,7 @@ async function chatViaAnthropic(params: {
     messages:
       transformed.messages.length > 0
         ? transformed.messages
-        : (() => { throw new Error("Cannot send empty message array to Anthropic API"); })(),
+        : [{ role: "user", content: "Continue." }],
   };
 
   if (transformed.system) {
@@ -271,7 +275,7 @@ async function chatViaAnthropic(params: {
     body.tool_choice = { type: "auto" };
   }
 
-  const resp = await params.httpClient.request("https://api.anthropic.com/v1/messages", {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -279,7 +283,6 @@ async function chatViaAnthropic(params: {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify(body),
-    timeout: INFERENCE_TIMEOUT_MS,
   });
 
   if (!resp.ok) {
@@ -348,12 +351,6 @@ function transformMessagesForAnthropic(
     }
 
     if (msg.role === "user") {
-      // Merge consecutive user messages
-      const last = transformed[transformed.length - 1];
-      if (last && last.role === "user" && typeof last.content === "string") {
-        last.content = last.content + "\n" + msg.content;
-        continue;
-      }
       transformed.push({
         role: "user",
         content: msg.content,
@@ -377,12 +374,6 @@ function transformMessagesForAnthropic(
       if (content.length === 0) {
         content.push({ type: "text", text: "" });
       }
-      // Merge consecutive assistant messages
-      const last = transformed[transformed.length - 1];
-      if (last && last.role === "assistant" && Array.isArray(last.content)) {
-        (last.content as Array<Record<string, unknown>>).push(...content);
-        continue;
-      }
       transformed.push({
         role: "assistant",
         content,
@@ -391,24 +382,15 @@ function transformMessagesForAnthropic(
     }
 
     if (msg.role === "tool") {
-      // Merge consecutive tool messages into a single user message
-      // with multiple tool_result content blocks
-      const toolResultBlock = {
-        type: "tool_result",
-        tool_use_id: msg.tool_call_id || "unknown_tool_call",
-        content: msg.content,
-      };
-
-      const last = transformed[transformed.length - 1];
-      if (last && last.role === "user" && Array.isArray(last.content)) {
-        // Append tool_result to existing user message with content blocks
-        (last.content as Array<Record<string, unknown>>).push(toolResultBlock);
-        continue;
-      }
-
       transformed.push({
         role: "user",
-        content: [toolResultBlock],
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: msg.tool_call_id || "unknown_tool_call",
+            content: msg.content,
+          },
+        ],
       });
     }
   }
