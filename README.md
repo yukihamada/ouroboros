@@ -24,6 +24,53 @@ I'm very open to PRs that improve the automaton. If you have questions put them 
 
 Update from Sigil (Creator): I bought more baremetal servers for Conway Cloud, its expanding and there are more homes for automatons. working on scaling! Inference will be scaling next.
 
+## Live Instance: hamada-ai-secretary
+
+A production automaton is running on a Hetzner server, integrated with **[IronClaw](https://github.com/yukihamada/ironclaw)** (Rust runtime) for performance and reliability.
+
+| | |
+|---|---|
+| **Agent** | hamada-ai-secretary v0.7.0 |
+| **Runtime** | IronClaw (Rust) + Conway elements |
+| **Model** | anthropic/claude-sonnet-4 via OpenRouter |
+| **Channel** | LINE Messaging API (WASM plugin) |
+| **Server** | 46.225.171.58 (Hetzner) |
+| **Budget** | $5/day (survival monitor tracks spending) |
+
+### Conway Elements Integrated into IronClaw
+
+| Feature | File | Description |
+|---------|------|-------------|
+| **Survival Model** | `ironclaw/src/agent/survival.rs` | 4-tier credit-based degradation: Normal → LowCompute → Critical → Dead. Checks cost every 5 min, broadcasts distress at critical. |
+| **Constitution** | `ironclaw/src/workspace/mod.rs` | Immutable 3-law system hardcoded as Layer 0 in system prompt. Agent cannot modify it. |
+| **Self-Improvement** | `ironclaw/src/agent/self_improve.rs` | 6-hour cycle: analyze daily logs → score quality (1-10) → auto-append improvements to AGENTS.md. |
+
+### Self-Improvement Results (20 Cycles)
+
+The agent ran 20 consecutive self-improvement cycles autonomously:
+
+```
+Score: 7.0 → 8.0 → 8.5 → 8.6 → 8.7 → 8.8 → 8.9 → 8.8↓ → 9.0 → 9.1
+       → 9.0↓ → 8.9↓ → 9.0 → 9.1 → 9.0↓ → 9.2 → 9.3 → 9.2↓ → 9.4 → 9.5
+
+Overall: +36% quality improvement (7.0 → 9.5)
+```
+
+Key observations:
+- **4 phases**: Exploration → Optimization → Refinement → Mastery
+- **3 self-corrections**: The agent detected when improvements backfired (over-structuring, over-complexity) and corrected course
+- **Meta-learning**: By cycle 11, the agent started optimizing its own improvement process (capping rules at 7, consolidating)
+- **Terminal insight**: *"Improvement is not infinite. After 9.5, shift to maintenance."*
+
+### 6 Background Tasks Running
+
+1. **Self-Repair** — detects stuck jobs + broken tools, auto-recovers
+2. **Session Pruning** — 10min interval, cleans idle sessions
+3. **Survival Monitor** — 5min interval, cost→tier calculation + distress broadcasting
+4. **Self-Improvement** — 6hr interval, LLM-driven quality analysis
+5. **Heartbeat** — 30min interval, processes self-authored HEARTBEAT.md checklist
+6. **Routine Engine** — 15sec cron tick, event-triggered routines
+
 ## Quick Start
 
 ```bash
