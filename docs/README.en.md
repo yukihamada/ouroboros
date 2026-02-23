@@ -32,7 +32,7 @@ What if an AI agent could—
 Ouroboros is a **self-compiling, self-improving AI agent runtime** written in Rust. Like the ancient serpent eating its own tail, it runs a continuous loop of autonomous evolution — but **it cannot take critical actions without human approval**.
 
 ```
-Receive task → Plan → Human approval → Execute → Earn USDC → Self-improve → Repeat
+Observe → Orient → Decide → Act → God View → Stop
 ```
 
 ---
@@ -66,13 +66,16 @@ Before the AI takes any action that affects external systems, **the system pause
 
 ### ② Glass-Box Thinking (Transparency)
 
-Every action includes a text explanation of **why it was chosen**. When something goes wrong, you can trace exactly where the AI's reasoning failed.
+Every action includes a text explanation of **why it was chosen**, mapped to OODA phases. When something goes wrong, you can trace exactly where the AI's reasoning failed.
 
 ```
-[Thinking] Server response is slow. Possible memory leak.
-[Plan] Want to run heap profiler → requesting approval
-[Waiting] Awaiting human approval...
-[Execute] Approved. Running profiler → leak identified.
+[Observe]   Server response is slow. Latency 3x normal.
+[Orient]    Started after yesterday's deploy. Likely memory leak.
+[Decide]    Want to run heap profiler → requesting approval
+[Waiting]   Awaiting human approval...
+[Act]       Approved. Running profiler → leak identified.
+[God View]  Response was appropriate. Next time, reproduce on staging first.
+            Assessment: OK
 ```
 
 ### ③ Honest Work Only (Ethical Economy)
@@ -144,6 +147,68 @@ The core of Ouroboros. The agent rewrites and recompiles itself — with human a
 | **Git rollback** | Build failure → instant `git checkout` recovery |
 | **Supervisor** | New binary fails to start → automatic rollback to previous version |
 | **Audit log** | All code changes recorded in append-only log, tamper-detectable |
+
+---
+
+## OODA Loop + God View
+
+Ouroboros operates on the **OODA loop** (Observe → Orient → Decide → Act). At the end of each loop, a **God View** — a meta-cognitive self-evaluation phase — runs before the loop stops.
+
+```
+  ┌─────────────────────────────────────────────────────┐
+  │                                                     │
+  │   ① Observe                                        │
+  │      What's happening? Gather facts.                │
+  │                      ↓                              │
+  │   ② Orient                                         │
+  │      Why is it happening? Understand context.       │
+  │                      ↓                              │
+  │   ③ Decide                                         │
+  │      What should I do? Choose an action.            │
+  │      External impact → 📱 Request human approval   │
+  │                      ↓                              │
+  │   ④ Act                                            │
+  │      Execute within approved scope.                 │
+  │                      ↓                              │
+  │   ⑤ God View                                       │
+  │      Step back and see the whole picture.           │
+  │      - Am I heading in the right direction?         │
+  │      - Am I violating the constitution?             │
+  │      - Is human trust maintained?                   │
+  │      - What should I improve next time?             │
+  │                      ↓                              │
+  │               Loop ends                             │
+  │          Wait for next trigger                      │
+  │                                                     │
+  └─────────────────────────────────────────────────────┘
+```
+
+### Why OODA + God View?
+
+| Traditional ReAct | Ouroboros OODA + God View |
+|:------------------|:-------------------------|
+| Think → Act → Observe | **Observe → Orient → Decide → Act → God View** |
+| Act first, observe after | Observe first, then act |
+| Context understanding is implicit | Orient phase explicitly analyzes context |
+| No meta-cognition | **God View provides self-evaluation** |
+| Loop runs indefinitely | **Loop stops after God View** |
+
+### God View
+
+A mandatory **self-evaluation phase** at the end of every loop. A second self — the "eye that sees the whole picture."
+
+```
+[God View] Assessment:
+  1. Purpose alignment: Does this serve the requested goal? → ✅
+  2. Safety: Any constitution violations? → ✅
+  3. Efficiency: Was there a simpler way? → ⚠️ Room for improvement
+  4. Trust: Is human trust maintained? → ✅
+  5. Sustainability: Am I wasting budget? → ✅
+  → Result: OK (improve efficiency next time)
+  → Loop ends. Waiting for next trigger.
+```
+
+**If "Danger" is assessed** → loop stops immediately, human is notified.
 
 ---
 
@@ -255,7 +320,7 @@ oro -m "What's on my schedule?"     # One-shot query
 │                                                                  │
 │   ┌────────────┐  ┌────────────┐  ┌──────────────────────┐      │
 │   │ Agent Loop │  │  Survival  │  │    Self-Compile      │      │
-│   │  (ReAct)   │  │  Monitor   │  │     Pipeline         │      │
+│   │  (OODA)   │  │  Monitor   │  │     Pipeline         │      │
 │   └─────┬──────┘  └─────┬──────┘  └──────────┬───────────┘      │
 │         │               │                     │                  │
 │         ▼               ▼                     ▼                  │
@@ -320,7 +385,7 @@ Six autonomous processes run continuously:
 ```
 src/
 ├── agent/
-│   ├── agent_loop.rs       # Main ReAct loop + background tasks
+│   ├── agent_loop.rs       # Main OODA loop + background tasks
 │   ├── survival.rs         # 4-tier survival model
 │   ├── self_improve.rs     # Autonomous improvement cycle
 │   ├── self_compile.rs     # Self-compile pipeline

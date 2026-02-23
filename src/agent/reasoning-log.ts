@@ -2,8 +2,9 @@
  * Reasoning Log — Transparent Audit Trail
  *
  * Structured, append-only record of the agent's reasoning process.
- * Every turn is decomposed into discrete phases:
- *   [思考] thinking  [計画] plan  [承認待ち] waiting_approval  [実行] execute  [エラー] error
+ * Every turn follows the OODA loop + God View phases:
+ *   [観察] observe  [状況判断] orient  [決定] decide  [承認待ち] waiting_approval
+ *   [行動] act  [神視点] god_view  [エラー] error
  *
  * Supports the append-only audit principle: INSERT only, no UPDATE/DELETE.
  */
@@ -16,7 +17,7 @@ const logger = createLogger("reasoning-log");
 
 // ─── Types ──────────────────────────────────────────────────────
 
-export type ReasoningPhase = "thinking" | "plan" | "waiting_approval" | "execute" | "error";
+export type ReasoningPhase = "observe" | "orient" | "decide" | "waiting_approval" | "act" | "god_view" | "error";
 
 export interface ReasoningStep {
   turnId: string;
@@ -81,27 +82,38 @@ export const MIGRATION_V9 = `
 // ─── Phase Labels (SOUL.md format) ─────────────────────────────
 
 const PHASE_LABELS: Record<ReasoningPhase, string> = {
-  thinking: "[思考]",
-  plan: "[計画]",
+  observe: "[観察]",
+  orient: "[状況判断]",
+  decide: "[決定]",
   waiting_approval: "[承認待ち]",
-  execute: "[実行]",
+  act: "[行動]",
+  god_view: "[神視点]",
   error: "[エラー]",
 };
 
 // Reverse lookup: Japanese label -> phase
 const LABEL_TO_PHASE: Record<string, ReasoningPhase> = {
-  "[思考]": "thinking",
-  "[計画]": "plan",
+  "[観察]": "observe",
+  "[状況判断]": "orient",
+  "[決定]": "decide",
   "[承認待ち]": "waiting_approval",
-  "[実行]": "execute",
+  "[行動]": "act",
+  "[神視点]": "god_view",
   "[エラー]": "error",
+  // Legacy compatibility
+  "[思考]": "observe",
+  "[計画]": "decide",
+  "[実行]": "act",
 };
 
 // ─── Parsing Patterns ──────────────────────────────────────────
 
-const BRACKET_PATTERN = /\[(思考|計画|承認待ち|実行|エラー)\]\s*/;
-const PLAN_KEYWORDS = /^(?:\d+[.)]\s|[-*]\s)|\b(?:plan|steps|手順|計画)\b/i;
+const BRACKET_PATTERN = /\[(観察|状況判断|決定|承認待ち|行動|神視点|エラー|思考|計画|実行)\]\s*/;
+const PLAN_KEYWORDS = /^(?:\d+[.)]\s|[-*]\s)|\b(?:plan|steps|手順|計画|決定)\b/i;
 const ERROR_KEYWORDS = /\b(?:error|failed|failure|exception|エラー|失敗|例外)\b/i;
+const OBSERVE_KEYWORDS = /\b(?:observe|noticed|saw|見た|確認|発見|状態|レイテンシ|応答)\b/i;
+const ORIENT_KEYWORDS = /\b(?:because|原因|理由|可能性|仮説|文脈|背景|分析)\b/i;
+const GOD_VIEW_KEYWORDS = /\b(?:overall|全体|俯瞰|評価|振り返り|改善|反省|assessment)\b/i;
 
 // ─── ReasoningLog Class ────────────────────────────────────────
 
@@ -172,9 +184,9 @@ export class ReasoningLog {
    * Parse free-form LLM thinking text into structured reasoning steps.
    *
    * Strategy:
-   * 1. Split on Japanese bracket markers ([思考], [計画], etc.)
-   * 2. For unmarked text, apply heuristics (plan detection, error detection)
-   * 3. Default to 'thinking' phase for unclassified content
+   * 1. Split on Japanese bracket markers ([観察], [状況判断], [決定], etc.)
+   * 2. For unmarked text, apply heuristics (observe, orient, decide, etc.)
+   * 3. Default to 'observe' phase for unclassified content
    */
   parseThinking(turnId: string, rawThinking: string): ReasoningStep[] {
     if (!rawThinking || rawThinking.trim().length === 0) {
@@ -187,9 +199,9 @@ export class ReasoningLog {
     // Check if the text contains explicit bracket markers
     if (BRACKET_PATTERN.test(rawThinking)) {
       // Split on bracket markers, keeping the delimiters
-      const segments = rawThinking.split(/(\[(?:思考|計画|承認待ち|実行|エラー)\])/);
+      const segments = rawThinking.split(/(\[(?:観察|状況判断|決定|承認待ち|行動|神視点|エラー|思考|計画|実行)\])/);
 
-      let currentPhase: ReasoningPhase = "thinking";
+      let currentPhase: ReasoningPhase = "observe";
 
       for (const segment of segments) {
         const trimmed = segment.trim();
@@ -213,7 +225,7 @@ export class ReasoningLog {
       // No explicit markers -- apply heuristic classification
       const lines = rawThinking.split("\n");
       let currentBlock: string[] = [];
-      let currentPhase: ReasoningPhase = "thinking";
+      let currentPhase: ReasoningPhase = "observe";
 
       const flushBlock = () => {
         const content = currentBlock.join("\n").trim();
@@ -242,12 +254,12 @@ export class ReasoningLog {
       flushBlock();
     }
 
-    // If no steps were parsed but we had content, create a single thinking step
+    // If no steps were parsed but we had content, create a single observe step
     if (steps.length === 0 && rawThinking.trim().length > 0) {
       steps.push({
         turnId,
         stepNumber: 0,
-        phase: "thinking",
+        phase: "observe",
         content: rawThinking.trim(),
       });
     }
@@ -430,10 +442,12 @@ export class ReasoningLog {
    */
   countByPhase(): Record<ReasoningPhase, number> {
     const result: Record<ReasoningPhase, number> = {
-      thinking: 0,
-      plan: 0,
+      observe: 0,
+      orient: 0,
+      decide: 0,
       waiting_approval: 0,
-      execute: 0,
+      act: 0,
+      god_view: 0,
       error: 0,
     };
 
@@ -478,19 +492,35 @@ export class ReasoningLog {
    */
   private classifyLine(line: string): ReasoningPhase {
     const trimmed = line.trim();
-    if (!trimmed) return "thinking";
+    if (!trimmed) return "observe";
 
     // Check for error indicators
     if (ERROR_KEYWORDS.test(trimmed)) {
       return "error";
     }
 
-    // Check for plan indicators (numbered/bulleted steps)
-    if (PLAN_KEYWORDS.test(trimmed)) {
-      return "plan";
+    // Check for god view indicators (meta-cognition, reflection)
+    if (GOD_VIEW_KEYWORDS.test(trimmed)) {
+      return "god_view";
     }
 
-    return "thinking";
+    // Check for orient indicators (causal reasoning, context)
+    if (ORIENT_KEYWORDS.test(trimmed)) {
+      return "orient";
+    }
+
+    // Check for decide indicators (numbered/bulleted steps, plans)
+    if (PLAN_KEYWORDS.test(trimmed)) {
+      return "decide";
+    }
+
+    // Check for observe indicators (data gathering)
+    if (OBSERVE_KEYWORDS.test(trimmed)) {
+      return "observe";
+    }
+
+    // Default: observe (gathering information)
+    return "observe";
   }
 }
 
